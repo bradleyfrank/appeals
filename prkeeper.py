@@ -12,8 +12,13 @@ import shutil
 import sys
 import tempfile
 import urllib.request
+from pathlib import Path
 from urllib.error import HTTPError
 from urllib.error import URLError
+
+DOWNLOAD_PATH = '/srv/public_records/downloads/appeals'
+STATUS_FILE = '/srv/public_records/status.log'
+LOG_FILE = '/srv/public_records/logs/prkeeper.log'
 
 
 class PublicRecordKeeper:
@@ -26,8 +31,7 @@ class PublicRecordKeeper:
         self.temp_directory = temp_directory
         self.download_path = download_path
 
-        if not os.path.isdir(self.download_path):
-            os.makedirs(self.download_path, exist_ok=True)
+        self.prlog.log('debug', 'Created new PublicRecordKeeper instance.')
 
     def get_records(self, file_ID):
         #
@@ -63,14 +67,14 @@ class PublicRecordKeeper:
 
         try:
             with open(tmpfile, 'wb') as f:
-                self.prlog.log('info', 'Writing to ' + tmpfile)
+                self.prlog.log('debug', 'Writing to ' + tmpfile)
                 shutil.copyfileobj(response, f)
         except IOError as e:
             print(e)
             return False
 
         mime = magic.from_file(tmpfile, mime=True)
-        self.prlog.log('info', 'mimetype is ' + str(mime))
+        self.prlog.log('debug', 'mimetype is ' + str(mime))
 
         if mime is None:
             return False
@@ -81,7 +85,7 @@ class PublicRecordKeeper:
         else:
             ext = mimetypes.guess_extension(mime, True)
 
-        self.prlog.log('info', 'Used extension ' + ext)
+        self.prlog.log('debug', 'Used extension ' + ext)
 
         filename = os.path.join(self.download_path, file_ID + ext)
 
@@ -93,25 +97,29 @@ class PublicRecordKeeper:
 
 class PRLogger:
 
-    def __init__(self, debug=False, logfile, \
-                 log_to_console=False, log_to_stdout=False):
+    def __init__(self, logfile, log_to_console=False, log_to_file=True):
         self.logger = logging.getLogger('prkeeper')
 
-        _log_format = '[%(asctime)s] [%(levelname)8s] %(message)s'
-        self.log_format = logging.Formatter(_log_format, '%H:%M:%S')
+        self.log_format = logging.Formatter(
+            '[%(asctime)s] [%(levelname)8s] %(message)s',
+            '%H:%M:%S')
 
-        if not debug:
-            self.log_level = 0
-        else:
-            self.log_level = 10
-
+        self.log_level = 10
         self.logger.setLevel(self.log_level)
 
-        if log_to_console or debug:
+        if log_to_console:
             self.log_to_console()
 
-        if log_to_stdout:
-            self.log_to_file()
+        if log_to_file:
+            log_dir, _ = os.path.split(logfile)
+
+            if not os.path.isdir(log_dir):
+                os.makedirs(log_dir, exist_ok=True)
+
+            if not os.path.isfile(LOG_FILE):
+                Path(LOG_FILE).touch()
+
+            self.log_to_file(logfile)
 
     def log_to_console(self):
         ch = logging.StreamHandler(sys.stdout)
@@ -119,8 +127,8 @@ class PRLogger:
         ch.setFormatter(self.log_format)
         self.logger.addHandler(ch)
 
-    def log_to_file(self):
-        fh = logging.FileHandler('/var/log/prkeeper.log')
+    def log_to_file(self, logfile):
+        fh = logging.FileHandler(logfile)
         fh.setLevel(self.log_level)
         fh.setFormatter(self.log_format)
         self.logger.addHandler(fh)
@@ -132,37 +140,25 @@ class PRLogger:
 
 if __name__ == '__main__':
     #
-    # Get the current working directory of this script.
-    #
-    # The join() call prepends the current working directory, but the
-    # documentation says that if some path is absolute, all other paths left
-    # of it are dropped. Therefore, getcwd() is dropped when dirname(__file__)
-    # returns an absolute path. The realpath call resolves symbolic links if
-    # any are found.
-    #
-    __location__ = os.path.realpath(
-        os.path.join(os.getcwd(), os.path.dirname(__file__)))
-
-    #
-    # Create a config parser instance and read in the config file, located
-    # in the same directory as this script.
-    #
-    conf = configparser.ConfigParser()
-    conf.read(os.path.join(__location__, 'prkeeper.conf'))
-
-    # Download settings
-    download_path = conf['downloads']['download_path']
-    download_range_start = int(conf['downloads']['download_range_start'])
-    download_range_end = int(conf['downloads']['download_range_end'])
-
-    # Logging settings
-    logfile = conf['logging']['logfile']
-
-    #
     # Set available command-line arguments.
     #
+    # --resume | --scope
+    # Downloads can be expressed in an explicit range, or resumed from a prior
+    # run of the program. Continuing is the default setting. The last download
+    # is tracked in the status file. These settings are mutually exclusive.
+    #
+    # --debug
+    # Prints all debug messages to the console.
+    #
     parser = argparse.ArgumentParser(
-        description='Wrapper for reposync and createrepo.')
+        description='Downloads Massachusetts public record appeals.')
+
+    download_method = parser.add_mutually_exclusive_group(required=True)
+    download_method.add_argument('-r', '--resume', action='store_true',
+                                 help='resumes downloading from a prior run')
+    download_method.add_argument('-s', '--scope', type=int, nargs=2,
+                                 help='a range of documents to download')
+
     parser.add_argument('-d', '--debug', action='store_true',
                         help='enables debug messages')
 
@@ -172,18 +168,40 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.debug:
-        prlog = PRLogger(debug=True, logfile=logfile)
+        prlog = PRLogger(LOG_FILE, log_to_console=True)
     else:
-        prlog = PRLogger(debug=False, logfile=logfile)
+        prlog = PRLogger(LOG_FILE)
+
+    if args.scope:
+        if args.scope[1] < args.scope[0]:
+            sys.exit('Start range cannot be greater than end range.')
+        else:
+            # Copy the arguments to a new variable.
+            download_range = args.scope.copy()
+            # Make the ending range inclusive.
+            download_range[1] = download_range[1] + 1
+            # Log the download method.
+            prlog.log('info', 'Beginning new run with range ' + \
+                      str(download_range[0]) + ' to ' + str(download_range[1]))
+    else:
+        prlog.log('info', 'Beginning new run resuming from ')
+
+    #
+    # Ensure the download directory exists.
+    #
+    if not os.path.isdir(DOWNLOAD_PATH):
+        os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
     #
     # Instantiate the main class with provided settings. This passes a
     # temporary system directory to use as scratch space.
     #
-    prkeeper = PublicRecordKeeper(prlog, tempfile.mkdtemp(), download_path)
+    prkeeper = PublicRecordKeeper(prlog, tempfile.mkdtemp(), DOWNLOAD_PATH)
 
     #
     # Loop through the specified document range to download documents.
     #
-    for document in range(download_range_start, download_range_end):
+    for document in range(download_range[0], download_range[1]):
         prkeeper.get_records(document)
+
+    prlog.log('debug', 'Ending current run.\n')
