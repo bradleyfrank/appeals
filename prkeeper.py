@@ -93,7 +93,8 @@ class PublicRecordKeeper:
 
 class PRLogger:
 
-    def __init__(self, debug=False, log_to_console=False, log_to_stdout=False):
+    def __init__(self, debug=False, logfile, \
+                 log_to_console=False, log_to_stdout=False):
         self.logger = logging.getLogger('prkeeper')
 
         _log_format = '[%(asctime)s] [%(levelname)8s] %(message)s'
@@ -143,17 +144,19 @@ if __name__ == '__main__':
         os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
     #
-    # Read the config file and parse out the settings, saving them as
-    # variables.
+    # Create a config parser instance and read in the config file, located
+    # in the same directory as this script.
     #
-    config_file = os.path.join(__location__, 'prkeeper.conf')
-
     conf = configparser.ConfigParser()
-    conf.read(config_file)
+    conf.read(os.path.join(__location__, 'prkeeper.conf'))
 
+    # Download settings
     download_path = conf['downloads']['download_path']
     download_range_start = int(conf['downloads']['download_range_start'])
     download_range_end = int(conf['downloads']['download_range_end'])
+
+    # Logging settings
+    logfile = conf['logging']['logfile']
 
     #
     # Set available command-line arguments.
@@ -169,9 +172,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.debug:
-        prlog = PRLogger(debug=True)
+        prlog = PRLogger(debug=True, logfile=logfile)
     else:
-        prlog = PRLogger(debug=False)
+        prlog = PRLogger(debug=False, logfile=logfile)
 
     #
     # Instantiate the main class with provided settings. This passes a
