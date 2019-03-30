@@ -16,12 +16,23 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.error import URLError
 
+#
+# General script variables; see __main__ function below.
+#
+# DOWNLOAD_PATH: save location for all downloaded documents
+# STATUS_FILE: tracks latest document downloaded
+# LOG_FILE: application-wide log file
+#
 DOWNLOAD_PATH = '/srv/public_records/downloads/appeals'
 STATUS_FILE = '/srv/public_records/status.log'
 LOG_FILE = '/srv/public_records/logs/prkeeper.log'
 
 
 class PublicRecordKeeper:
+    """
+    Class for handling downloading, type checking, and saving documents from
+    the MA Secretary of State website.
+    """
 
     BASE_URL = 'https://www.sec.state.ma.us' + \
                '/AppealsWeb/Download.aspx?DownloadPath='
@@ -53,6 +64,9 @@ class PublicRecordKeeper:
         #
         tmpfile = os.path.join(self.temp_directory, file_ID)
 
+        #
+        # Try to download the specified document. Raises errors as necessary.
+        #
         try:
             self.prlog.log('info', 'Downloading ' + download_url)
             response = urllib.request.urlopen(download_url)
@@ -140,7 +154,7 @@ class PRLogger:
 
 if __name__ == '__main__':
     #
-    # Set available command-line arguments.
+    # Set available command-line arguments; parse provided arguments.
     #
     # --resume | --scope
     # Downloads can be expressed in an explicit range, or resumed from a prior
@@ -150,28 +164,34 @@ if __name__ == '__main__':
     # --debug
     # Prints all debug messages to the console.
     #
-    parser = argparse.ArgumentParser(
+    arguments = argparse.ArgumentParser(
         description='Downloads Massachusetts public record appeals.')
 
-    download_method = parser.add_mutually_exclusive_group(required=True)
+    download_method = arguments.add_mutually_exclusive_group(required=True)
     download_method.add_argument('-r', '--resume', action='store_true',
                                  help='resumes downloading from a prior run')
     download_method.add_argument('-s', '--scope', type=int, nargs=2,
                                  help='a range of documents to download')
 
-    parser.add_argument('-d', '--debug', action='store_true',
+    arguments.add_argument('-d', '--debug', action='store_true',
                         help='enables debug messages')
 
-    #
-    # Parse any passed command-line arguments.
-    #
-    args = parser.parse_args()
+    args = arguments.parse_args()
 
+    #
+    # Sets logging for the application: adds additional conole output if
+    # the debug argument is passed, otherwise just logs to file by default.
+    #
     if args.debug:
         prlog = PRLogger(LOG_FILE, log_to_console=True)
     else:
         prlog = PRLogger(LOG_FILE)
 
+    #
+    # One of two methods must be given to begin downloading: (a) a range of
+    # documents to download, or (b) resume downloading incrementally from
+    # where downloading last left off.
+    #
     if args.scope:
         if args.scope[1] < args.scope[0]:
             sys.exit('Start range cannot be greater than end range.')
@@ -199,7 +219,7 @@ if __name__ == '__main__':
     prkeeper = PublicRecordKeeper(prlog, tempfile.mkdtemp(), DOWNLOAD_PATH)
 
     #
-    # Loop through the specified document range to download documents.
+    # Loop through the specified range to download documents.
     #
     for document in range(download_range[0], download_range[1]):
         prkeeper.get_records(document)
