@@ -1,6 +1,6 @@
 FROM        centos:latest
 
-LABEL       Name="appeals" \
+LABEL       Name="prkeeper" \
             Author="Brad Frank" \
             Maintainer="bradley.frank@gmail.com" \
             Description="Container for downloading public records appeals."
