@@ -10,9 +10,9 @@ RUN         yum -y install epel-release && \
 
 RUN         mkdir /opt/prkeeper /srv/public_records
 COPY        . /opt/prkeeper/
-RUN         chmod 755 /opt/prkeeper/prkeeper.py
+RUN         chmod 755 /opt/prkeeper/main.py
 
-RUN         pip3 install -r /opt/prkeeper/requirements.txt
+RUN         pip3.4 install -r /opt/prkeeper/requirements.txt
 
-ENTRYPOINT  ["/opt/prkeeper/prkeeper.py"]
+ENTRYPOINT  ["/opt/prkeeper/main.py"]
 CMD         ["--resume"]
