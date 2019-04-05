@@ -4,7 +4,7 @@ __author__ = 'Bradley Frank'
 
 import argparse
 from prkeeper.logger import PRLogger
-from prkeeper.download import PublicRecordKeeper
+from prkeeper.download import PRDownloader
 
 #
 # General script variables:
@@ -57,14 +57,7 @@ def set_arguments():
     return arguments
 
 
-#
-# Set program command line arguments.
-#
 arguments = set_arguments()
-
-#
-# Get all arguments/flags passed to the program.
-#
 args = arguments.parse_args()
 
 #

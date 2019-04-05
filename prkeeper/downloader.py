@@ -17,7 +17,7 @@ from urllib.error import HTTPError
 from urllib.error import URLError
 
 
-class PublicRecordKeeper:
+class PRDownloader:
     """
     Class for handling downloading, type checking, and saving documents from
     the MA Secretary of State website.
