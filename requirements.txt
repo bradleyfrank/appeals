@@ -1,0 +1,6 @@
+# determining file mimetype
+python-magic
+# reading and manipulating PDF files
+pypdf2
+# interacting with AWS S3 storage
+boto3
