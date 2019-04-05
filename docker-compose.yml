@@ -3,9 +3,9 @@ version: '3'
 services:
   prkeeper:
     container_name: prkeeper
+    env_file:
+      - ./credentials.env
     environment:
-      - MYSQL_ROOT_PASSWORD=
-      - MYSQL_PASSWORD=
       - MYSQL_DATABASE=prkeeper
       - MYSQL_USER=prkeeper
     hostname: prkeeper
