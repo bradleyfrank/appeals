@@ -3,7 +3,7 @@
 __author__ = 'Bradley Frank'
 
 import argparse
-import configparser
+import datetime
 import logging
 import magic
 import mimetypes
@@ -13,6 +13,8 @@ import sys
 import tempfile
 import urllib.request
 from pathlib import Path
+from PyPDF2 import PdfFileReader
+from PyPDF2.utils import PdfReadError
 from urllib.error import HTTPError
 from urllib.error import URLError
 
@@ -65,48 +67,108 @@ class PublicRecordKeeper:
         tmpfile = os.path.join(self.temp_directory, file_ID)
 
         #
-        # Try to download the specified document. Raises errors as necessary.
+        # Try to download the specified document. If problems are encountered
+        # finding or downloading the document, log the error and skip to the
+        # next document (if there is any remaining).
         #
         try:
             self.prlog.log('info', 'Downloading ' + download_url)
             response = urllib.request.urlopen(download_url)
         except HTTPError as e:
-            self.prlog.log('warning', 'Could not download file ID ' + file_ID)
+            self.prlog.log('warning', 'There was a problem retrieving \
+                           the file')
             self.prlog.log('debug', e.code)
             return False
         except URLError as e:
-            self.prlog.log('warning', 'Could not download file ID ' + file_ID)
+            self.prlog.log('warning', 'There was a problem finding the file')
             self.prlog.log('debug', e.reason)
             return False
 
+        #
+        # Save the data retrieved from the website to a temporary file. This
+        # allows analyzing the file before saving it permanently.
+        #
         try:
             with open(tmpfile, 'wb') as f:
                 self.prlog.log('debug', 'Writing to ' + tmpfile)
                 shutil.copyfileobj(response, f)
         except IOError as e:
-            print(e)
-            return False
+            self.prlog.log('debug', e)
+            sys.exit('Could not save to temp file ' + tmpfile)
 
+        #
+        # Determine the type of file downloaded. Ususally it's either a Word
+        # document, or a PDF. If neither, try to automatically determine the
+        # file extension from the mimetype. If the mimetype cannot be
+        # determined, there's a problem with the file (could be corrupt) and it
+        # needs to be investigated.
+        #
         mime = magic.from_file(tmpfile, mime=True)
         self.prlog.log('debug', 'mimetype is ' + str(mime))
 
         if mime is None:
-            return False
+            extension = 'unknown'
         elif mime == 'application/msword':
-            ext = '.doc'
+            extension = 'doc'
         elif mime == 'application/pdf':
-            ext = '.pdf'
+            extension = 'pdf'
         else:
-            ext = mimetypes.guess_extension(mime, True)
+            #
+            # The function guess_extension returns a "." prefix so remove it
+            # with [1:]; this makes it easier to reference the extension, and
+            # the dot will be re-added manually later on.
+            #
+            extension = mimetypes.guess_extension(mime, True)[1:]
 
-        self.prlog.log('debug', 'Used extension ' + ext)
+        self.prlog.log('debug', 'Determined extension to be ' + extension)
 
-        filename = os.path.join(self.download_path, file_ID + ext)
+        #
+        # The creation date of the document is used to inform the program
+        # to continue or stop downloading further documents (since in theory
+        # there wouldn't be documents with creation dates in the future), even
+        # if the program hasn't reached the end of a specified range given by
+        # the user. The first step is to extract the creation date.
+        #
+        date = get_date(extension, tmpfile)
 
+        #
+        # With the extension determined, set the full path to the new
+        # permenant file name. The dot before the extension is re-added here.
+        #
+        filename = os.path.join(self.download_path, file_ID + '.' + extension)
+
+        #
+        # Move the temp file into proper download location.
+        #
         self.prlog.log('info', 'Moving file to ' + filename)
         shutil.move(tmpfile, filename)
 
         return True
+
+    def get_date(self, file_type, tmpfile):
+        if file_type == 'pdf':
+            with open(tmpfile, 'rb') as f:
+                try:
+                    pdf = PdfFileReader(f)
+                except PdfReadError as e:
+                    self.prlog.log('debug', e)
+                    sys.exit('Could not open PDF to read metadata.')
+
+                metadata = pdf.getDocumentInfo()
+                self.prlog.log('debug', metadata)
+
+            if '/CreationDate' not in metadata:
+                self.prlog.log('warning', 'Creation date not found')
+                return None
+            else:
+                creation_date = metadata['/CreationDate']
+
+            match = re.search('\d+', creation_date)
+            fulldate = datetime.datetime.strptime(
+                match.group(), '%Y%m%d%H%M%S'
+            )
+
+            return fulldate.strftime('%Y-%m-%d')
 
 
 class PRLogger:
@@ -154,28 +216,45 @@ class PRLogger:
 
 if __name__ == '__main__':
     #
-    # Set available command-line arguments; parse provided arguments.
+    # Set available command-line arguments.
+    #
+    arguments = argparse.ArgumentParser(
+        description='Downloads Massachusetts public record appeals.')
+
+    #
+    # --debug
+    # Prints all debug messages to the console.
+    #
+    arguments.add_argument('-d', '--debug', action='store_true',
+                           help='enables debug messages')
+
     #
     # --resume | --scope
     # Downloads can be expressed in an explicit range, or resumed from a prior
     # run of the program. Continuing is the default setting. The last download
     # is tracked in the status file. These settings are mutually exclusive.
     #
-    # --debug
-    # Prints all debug messages to the console.
-    #
-    arguments = argparse.ArgumentParser(
-        description='Downloads Massachusetts public record appeals.')
-
     download_method = arguments.add_mutually_exclusive_group(required=True)
     download_method.add_argument('-r', '--resume', action='store_true',
                                  help='resumes downloading from a prior run')
     download_method.add_argument('-s', '--scope', type=int, nargs=2,
-                                 help='a range of documents to download')
+                                 help='download documents between start and \
+                                 end values (inclusive); set end value to 0 \
+                                 to download all available documents after \
+                                 start value')
 
-    arguments.add_argument('-d', '--debug', action='store_true',
-                        help='enables debug messages')
+    #
+    # --s3
+    # Saves documents to an AWS s3 bucket. By default the documents save to
+    # disk, but s3 can also be used. Credentials for AWS should be entered
+    # into the credentials.env file found in this Git repo.
+    #
+    arguments.add_argument('--s3', action='store_true',
+                           help='saves downloads to aws s3 bucket')
 
+    #
+    # Parses all the arguments passed to the script.
+    #
     args = arguments.parse_args()
 
     #
@@ -188,33 +267,36 @@ if __name__ == '__main__':
         prlog = PRLogger(LOG_FILE)
 
     #
-    # One of two methods must be given to begin downloading: (a) a range of
-    # documents to download, or (b) resume downloading incrementally from
-    # where downloading last left off.
+    # One of two download methods must be given to begin downloading: (a) a
+    # range of documents to download, or (b) resume downloading from where
+    # last left off.
     #
     if args.scope:
-        if args.scope[1] < args.scope[0]:
+        if args.scope[1] < args.scope[0] and args.scope[1] != 0:
             sys.exit('Start range cannot be greater than end range.')
         else:
-            # Copy the arguments to a new variable.
+            # Copy the arguments to a new stand-alone variable.
             download_range = args.scope.copy()
-            # Make the ending range inclusive.
+            # Make the ending range inclusive, as the user would expect.
             download_range[1] = download_range[1] + 1
             # Log the download method.
-            prlog.log('info', 'Beginning new run with range ' + \
+            prlog.log('info', 'Beginning new run with range ' +
                       str(download_range[0]) + ' to ' + str(download_range[1]))
     else:
-        prlog.log('info', 'Beginning new run resuming from ')
+        prlog.log('info', 'Resuming downloads')
 
     #
-    # Ensure the download directory exists.
+    # If s3 was selected, setup the bucket if one does not exist already.
+    # Otherwise, ensure the download directory exists on disk.
     #
-    if not os.path.isdir(DOWNLOAD_PATH):
+    if args.s3:
+        pass
+    elif not os.path.isdir(DOWNLOAD_PATH):
         os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
     #
     # Instantiate the main class with provided settings. This passes a
-    # temporary system directory to use as scratch space.
+    # temporary directory to use as scratch space to save downloads.
     #
     prkeeper = PublicRecordKeeper(prlog, tempfile.mkdtemp(), DOWNLOAD_PATH)
 
@@ -224,4 +306,4 @@ if __name__ == '__main__':
     for document in range(download_range[0], download_range[1]):
         prkeeper.get_records(document)
 
-    prlog.log('debug', 'Ending current run.\n')
+    prlog.log('debug', 'Ending current run\n')
