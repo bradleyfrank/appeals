@@ -4,7 +4,6 @@ __author__ = 'Bradley Frank'
 
 import datetime
 import magic
-import mimetypes
 import os
 import shutil
 import sys
@@ -27,12 +26,18 @@ class PRDownloader:
                '/AppealsWeb/Download.aspx?DownloadPath='
 
     def __init__(self, prlog, download_path):
+        # The current logger.
         self.prlog = prlog
         # A temporary directory to use as scratch space to save downloads.
         self.temp_directory = tempfile.mkdtemp()
+        # The permanent directory to save downloads.
         self.download_path = download_path
+        # Today's date for comparison to document creation date.
+        self.today = datetime.datetime.now()
+        # Latest document successfully downloaded.
+        self.latest_document = None
 
-        self.prlog.log('debug', 'Created new PublicRecordKeeper instance.')
+        self.prlog.log('debug', 'Created new PRDownloader instance.')
 
     def get_records(self, file_ID):
         #
@@ -59,8 +64,8 @@ class PRDownloader:
         # finding or downloading the document, log the error and skip to the
         # next document (if there is any remaining).
         #
+        self.prlog.log('info', 'Downloading ' + download_url)
         try:
-            self.prlog.log('info', 'Downloading ' + download_url)
             response = urllib.request.urlopen(download_url)
         except HTTPError as e:
             self.prlog.log('warning', 'There was a problem retrieving \
@@ -76,37 +81,27 @@ class PRDownloader:
         # Save the data retrieved from the website to a temporary file. This
         # allows analyzing the file before saving it permanently.
         #
+        self.prlog.log('debug', 'Writing to ' + tmpfile)
         try:
             with open(tmpfile, 'wb') as f:
-                self.prlog.log('debug', 'Writing to ' + tmpfile)
                 shutil.copyfileobj(response, f)
         except IOError as e:
             self.prlog.log('debug', e)
             sys.exit('Could not save to temp file ' + tmpfile)
 
         #
-        # Determine the type of file downloaded. Ususally it's either a Word
-        # document, or a PDF. If neither, try to automatically determine the
-        # file extension from the mimetype. If the mimetype cannot be
-        # determined, there's a problem with the file (could be corrupt) and it
-        # needs to be investigated.
+        # Determine the type of file downloaded. Ususally it's either a
+        # Word document, or a PDF.
         #
         mime = magic.from_file(tmpfile, mime=True)
-        self.prlog.log('debug', 'mimetype is ' + str(mime))
+        self.prlog.log('debug', 'Mimetype is ' + str(mime))
 
-        if mime is None:
-            extension = 'unknown'
-        elif mime == 'application/msword':
+        if mime == 'application/msword':
             extension = 'doc'
         elif mime == 'application/pdf':
             extension = 'pdf'
         else:
-            #
-            # The function guess_extension returns a "." prefix so remove it
-            # with [1:]; this makes it easier to reference the extension, and
-            # the dot will be re-added manually later on.
-            #
-            extension = mimetypes.guess_extension(mime, True)[1:]
+            return False
 
         self.prlog.log('debug', 'Determined extension to be ' + extension)
 
@@ -128,13 +123,33 @@ class PRDownloader:
         #
         # Move the temp file into proper download location.
         #
-        self.prlog.log('info', 'Moving file to ' + filename)
-        shutil.move(tmpfile, filename)
+        self.prlog.log('info', 'Moving temp file to ' + filename)
+        try:
+            shutil.move(tmpfile, filename)
+        except IOError as e:
+            self.prlog.log('debug', e)
+            sys.exit('Could not move temp file to ' + filename)
+
+        #
+        # Keep track of the latest document downloaded. This value will be
+        # used if the program was called using the --resume argument.
+        #
+        self.latest_document = file_ID
 
         return True
 
     def get_date(self, file_type, tmpfile):
-        if file_type == 'pdf':
+        """Extract a date from PDFs and Word documents metadata.
+
+        Args:
+            file_type (str): The file type
+            tmpfile (str): The file path
+
+        Returns:
+            created_date (datetime): The file created date
+        """
+
+        def get_date_pdf(tmpfile):
             with open(tmpfile, 'rb') as f:
                 try:
                     pdf = PdfFileReader(f)
@@ -149,14 +164,25 @@ class PRDownloader:
                 self.prlog.log('warning', 'Creation date not found')
                 return None
             else:
-                creation_date = metadata['/CreationDate']
+                pdf_creation_date = metadata['/CreationDate']
 
-            match = re.search('\d+', creation_date)
-            fulldate = datetime.datetime.strptime(
+            match = re.search(r'\d+', pdf_creation_date)
+
+            creation_date = datetime.datetime.strptime(
                 match.group(), '%Y%m%d%H%M%S'
             )
 
-            return fulldate.strftime('%Y-%m-%d')
+            return creation_date
+
+        def get_date_doc(tmpfile):
+            return None
+
+        if file_type == 'pdf':
+            return get_date_pdf(tmpfile)
+        elif file_type == 'doc':
+            return get_date_doc(tmpfile)
+        else:
+            return False
 
 
 if __name__ == '__main__':

@@ -28,7 +28,7 @@ def set_arguments():
     # Prints all debug messages to the console.
     #
     arguments.add_argument('-d', '--debug', action='store_true',
-                           help='enables debug messages')
+                           help='enables console debug messages')
 
     #
     # --resume | --scope
@@ -56,7 +56,32 @@ def set_arguments():
 
     return arguments
 
+def get_documents(start_range, end_range):
+    #
+    # Instantiate the download class.
+    #
+    prdl = PRDownloader(prlog, DOWNLOAD_PATH)
 
+    #
+    #
+    #
+    explicit_range = True if end_range is not None else False
+
+    #
+    # Log the download range.
+    #
+    prlog.log('info', 'Beginning new run with range ' +
+              str(start_range) + ' to ' + str(end_range))
+
+    #
+    # Loop through the specified range to download documents.
+    #
+    for document in range(start_range, end_range):
+        prdl.get_records(document)
+
+#
+# Setup and read arguments given to the script.
+#
 arguments = set_arguments()
 args = arguments.parse_args()
 
@@ -70,25 +95,6 @@ else:
     prlog = PRLogger(LOG_FILE)
 
 #
-# One of two download methods must be given to begin downloading: (a) a
-# range of documents to download, or (b) resume downloading from where
-# last left off.
-#
-if args.scope:
-    if args.scope[1] < args.scope[0] and args.scope[1] != 0:
-        sys.exit('Start range cannot be greater than end range.')
-    else:
-        # Copy the arguments to a new stand-alone variable.
-        download_range = args.scope.copy()
-        # Make the ending range inclusive, as the user would expect.
-        download_range[1] = download_range[1] + 1
-        # Log the download method.
-        prlog.log('info', 'Beginning new run with range ' +
-                  str(download_range[0]) + ' to ' + str(download_range[1]))
-else:
-    prlog.log('info', 'Resuming downloads')
-
-#
 # If s3 was selected, setup the bucket if one does not exist already.
 # Otherwise, ensure the download directory exists on disk.
 #
@@ -98,14 +104,36 @@ elif not os.path.isdir(DOWNLOAD_PATH):
     os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
 #
-# Instantiate the prkeeper class with provided settings.
+# One of two download methods must be given to begin downloading: (a) a range
+# of documents to download, or (b) resume downloading from where last left off.
 #
-prkeeper = PublicRecordKeeper(prlog, DOWNLOAD_PATH)
-
-#
-# Loop through the specified range to download documents.
-#
-for document in range(download_range[0], download_range[1]):
-    prkeeper.get_records(document)
+if args.scope:
+    #
+    # The high-end value can only be less than the low-end value if the
+    # high-end value is 0, which means begin at the low-end value and
+    # continue until reaching the end.
+    #
+    if args.scope[1] == 0:
+        get_documents(args.scope[0], None)
+    #
+    # If the high-end value is not 0, but is less than the low-end value,
+    # throw an error and exit.
+    #
+    elif args.scope[1] < args.scope[0]:
+        sys.exit('Start range cannot be greater than end range.')
+    #
+    # Otherwise a nominal range was given.
+    #
+    else:
+        #
+        # Note that by default, the range() function stops at one value below
+        # the high-end (i.e. range(2,5) returns 2, 3, and 4), so make the
+        # ending range inclusive, as the user would expect, by adding + 1.
+        #
+        get_documents(args.scope[0], args.scope[1] + 1)
+else:
+    prlog.log('info', 'Resuming downloads')
+    # TODO: get last downloaded document
+    # get_documents(start_value, None)
 
 prlog.log('debug', 'Ending current run\n')
