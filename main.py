@@ -21,7 +21,7 @@ def set_arguments():
     # Set available command-line arguments.
     #
     arguments = argparse.ArgumentParser(
-        description='Downloads Massachusetts public record appeals.')
+        description='Downloads Massachusetts public records.')
 
     #
     # --debug
@@ -91,18 +91,36 @@ def get_documents(start_range, end_range):
     #
     while continue_downloads is True:
         #
-        # Calls the function to handle the download.
+        # Calls the function to handle the download, passing the document ID
+        # to download. PRDownloader tracks document attributes as it downloads
+        # each file. It will return False if the download fails at any point.
+        # Should it fail, the intention is to skip to the next document and
+        # not exit the program.
         #
         if prdl.get_records(document_ID) is not False:
             #
-            # Get the filename of the downloaded document.
+            # Collect document attributes to use for analzying.
             #
-            filename = prdl.get_filename()
+            filename = prdl.get_filename(document_ID)
+            mimetype = prdl.get_mimetype(document_ID)
+            extension = prdl.get_extension(document_ID)
 
             #
-            # TODO
+            # Creates an PRAnalyzer instance for gathering metadata and parsing
+            # text of the document for uploading to the database.
             #
-            DOCUMENTS[document_ID] = PRAnalyzer(prlog)
+            DOCUMENTS[document_ID] = PRAnalyzer(prlog,
+                                                filename, mimetype, extension)
+
+            #
+            # The creation date of the document is used to inform the program
+            # to continue or stop downloading further documents (since in
+            # theory there wouldn't be documents with creation dates in the
+            # future), even if the program hasn't reached the end of a
+            # specified range given by the user. The first step is to extract
+            # the creation date.
+            #
+            creation_date = DOCUMENTS[document_ID].get_creation_date()
         else:
             prlog.log('warning', 'Downloading ' + str(document_ID) + ' failed')
 
@@ -132,8 +150,8 @@ elif not os.path.isdir(DOWNLOAD_PATH):
     os.makedirs(DOWNLOAD_PATH, exist_ok=True)
 
 #
-# One of two download methods must be given to begin downloading: (a) a range
-# of documents to download, or (b) resume downloading from where last left off.
+# Download the documents. The first method:
+# A range of documents to download, i.e. the "scope" argument is set.
 #
 if args.scope:
     #
@@ -144,8 +162,7 @@ if args.scope:
     if args.scope[1] == 0:
         get_documents(args.scope[0], None)
     #
-    # If the high-end value is not 0, but is less than the low-end value,
-    # throw an error and exit.
+    # If tThe high-end value is less than the low-end value, exit with error.
     #
     elif args.scope[1] < args.scope[0]:
         sys.exit('Start range cannot be greater than end range.')
@@ -154,14 +171,23 @@ if args.scope:
     #
     else:
         #
-        # Note that by default, the range() function stops at one value below
-        # the high-end (i.e. range(2,5) returns 2, 3, and 4), so make the
-        # ending range inclusive, as the user would expect, by adding + 1.
+        # A regular scope was provided, proceed to download those documents.
         #
-        get_documents(args.scope[0], args.scope[1] + 1)
-else:
+        get_documents(args.scope[0], args.scope[1])
+#
+# Download the documents. The second method:
+# Start from where last left off, i.e. the "resume" argument is set.
+#
+elif args.resume:
     prlog.log('info', 'Resuming downloads')
     # TODO: get last downloaded document
     # get_documents(start_value, None)
+#
+# This catches a scenario where somehow neither --resume nor --scope was set.
+# Lack of those arguments should be caught by argparser, so this if this is
+# executed, there's an error present somewhere else.
+#
+else:
+    
 
 prlog.log('debug', 'Ending current run\n')
