@@ -9,7 +9,7 @@ from prkeeper.download import PRDownloader
 #
 # General script variables:
 #
-# DOWNLOAD_PATH: save location for all downloaded documents
+# DOWNLOAD_PATH: local save location for downloaded documents
 # LOG_FILE: application-wide log file
 #
 DOWNLOAD_PATH = '/srv/public_records/downloads/appeals'
@@ -56,17 +56,8 @@ def set_arguments():
 
     return arguments
 
+
 def get_documents(start_range, end_range):
-    #
-    # Instantiate the download class.
-    #
-    prdl = PRDownloader(prlog, DOWNLOAD_PATH)
-
-    #
-    #
-    #
-    explicit_range = True if end_range is not None else False
-
     #
     # Log the download range.
     #
@@ -74,10 +65,47 @@ def get_documents(start_range, end_range):
               str(start_range) + ' to ' + str(end_range))
 
     #
-    # Loop through the specified range to download documents.
+    # Variable that ultimately allows or stops document downloading.
     #
-    for document in range(start_range, end_range):
-        prdl.get_records(document)
+    continue_downloads = True
+
+    #
+    # Latest document successfully downloaded.
+    #
+    latest_document = None
+
+    #
+    # The document ID that is being downloaded. Set to the start_range
+    # to begin; gets incremented within the download loop after that.
+    #
+    document_ID = start_range
+
+    #
+    # Instantiant the downloader class, providing a temporary directory
+    # to use as scratch space to save downloads.
+    #
+    prdl = PRDownloader(prlog, DOWNLOAD_PATH, tempfile.mkdtemp())
+
+    #
+    # Loop through the given document range, downloading incrementally.
+    #
+    while continue_downloads is True:
+        #
+        # Calls the function to handle the download.
+        #
+        if prdl.get_records(document_ID) is not False:
+            #
+            # Get the filename of the downloaded document.
+            #
+            filename = prdl.get_filename()
+
+            #
+            # TODO
+            #
+            DOCUMENTS[document_ID] = PRAnalyzer(prlog)
+        else:
+            prlog.log('warning', 'Downloading ' + str(document_ID) + ' failed')
+
 
 #
 # Setup and read arguments given to the script.
