@@ -1,10 +1,14 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python
 
 __author__ = 'Bradley Frank'
 
 import argparse
-from prkeeper.logger import PRLogger
-from prkeeper.download import PRDownloader
+import os
+import sys
+import tempfile
+from prkeeper import PRAnalyzer
+from prkeeper import PRDownloader
+from prkeeper import PRLogger
 
 #
 # General script variables:
@@ -12,8 +16,9 @@ from prkeeper.download import PRDownloader
 # DOWNLOAD_PATH: local save location for downloaded documents
 # LOG_FILE: application-wide log file
 #
-DOWNLOAD_PATH = '/srv/public_records/downloads/appeals'
-LOG_FILE = '/srv/public_records/logs/prkeeper.log'
+DOWNLOAD_PATH = '/opt/prkeeper/downloads/appeals'
+LOG_FILE = '/opt/prkeeper/logs/prkeeper.log'
+DOCUMENTS = []
 
 
 def set_arguments():
@@ -78,13 +83,13 @@ def get_documents(start_range, end_range):
     # The document ID that is being downloaded. Set to the start_range
     # to begin; gets incremented within the download loop after that.
     #
-    document_ID = start_range
+    document_id = start_range
 
     #
     # Instantiant the downloader class, providing a temporary directory
     # to use as scratch space to save downloads.
     #
-    prdl = PRDownloader(prlog, DOWNLOAD_PATH, tempfile.mkdtemp())
+    prdl = PRDownloader.PRDownloader(prlog, DOWNLOAD_PATH, tempfile.mkdtemp())
 
     #
     # Loop through the given document range, downloading incrementally.
@@ -97,20 +102,22 @@ def get_documents(start_range, end_range):
         # Should it fail, the intention is to skip to the next document and
         # not exit the program.
         #
-        if prdl.get_records(document_ID) is not False:
+        if prdl.get_records(document_id) is not False:
             #
             # Collect document attributes to use for analzying.
             #
-            filename = prdl.get_filename(document_ID)
-            mimetype = prdl.get_mimetype(document_ID)
-            extension = prdl.get_extension(document_ID)
+            filename = prdl.get_filename(document_id)
+            mimetype = prdl.get_mimetype(document_id)
+            extension = prdl.get_extension(document_id)
 
             #
             # Creates an PRAnalyzer instance for gathering metadata and parsing
             # text of the document for uploading to the database.
             #
-            DOCUMENTS[document_ID] = PRAnalyzer(prlog,
-                                                filename, mimetype, extension)
+            DOCUMENTS[document_id] = PRAnalyzer.PRAnalyzer(prlog,
+                                                           filename,
+                                                           mimetype,
+                                                           extension)
 
             #
             # The creation date of the document is used to inform the program
@@ -120,25 +127,24 @@ def get_documents(start_range, end_range):
             # specified range given by the user. The first step is to extract
             # the creation date.
             #
-            creation_date = DOCUMENTS[document_ID].get_creation_date()
+            # creation_date = DOCUMENTS[document_id].get_creation_date()
         else:
-            prlog.log('warning', 'Downloading ' + str(document_ID) + ' failed')
+            prlog.log('warning', 'Downloading ' + str(document_id) + ' failed')
 
 
 #
 # Setup and read arguments given to the script.
 #
-arguments = set_arguments()
-args = arguments.parse_args()
+args = set_arguments().parse_args()
 
 #
 # Sets logging for the application: adds additional conole output if
 # the debug argument is passed, otherwise just logs to file by default.
 #
 if args.debug:
-    prlog = PRLogger(LOG_FILE, log_to_console=True)
+    prlog = PRLogger.PRLogger(LOG_FILE, log_to_console=True)
 else:
-    prlog = PRLogger(LOG_FILE)
+    prlog = PRLogger.PRLogger(LOG_FILE)
 
 #
 # If s3 was selected, setup the bucket if one does not exist already.
@@ -188,6 +194,6 @@ elif args.resume:
 # executed, there's an error present somewhere else.
 #
 else:
-    
+    pass
 
 prlog.log('debug', 'Ending current run\n')

@@ -1,8 +1,11 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 
 __author__ = 'Bradley Frank'
 
 import logging
+import os
+import sys
+from pathlib import Path
 
 
 class PRLogger:
@@ -25,8 +28,8 @@ class PRLogger:
             if not os.path.isdir(log_dir):
                 os.makedirs(log_dir, exist_ok=True)
 
-            if not os.path.isfile(LOG_FILE):
-                Path(LOG_FILE).touch()
+            if not os.path.isfile(logfile):
+                Path(logfile).touch()
 
             self.log_to_file(logfile)
 

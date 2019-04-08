@@ -1,9 +1,11 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python
 
 __author__ = 'Bradley Frank'
 
 import datetime
 import lxml.etree
+import re
+import sys
 import zipfile
 from PyPDF2 import PdfFileReader
 from PyPDF2.utils import PdfReadError
@@ -114,7 +116,7 @@ class PRAnalyzer:
         self.title = title
 
     def _normalize_date(self, formatted_date):
-        
+        pass
 
 
 if __name__ == '__main__':

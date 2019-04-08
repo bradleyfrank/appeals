@@ -1,4 +1,4 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python
 
 __author__ = 'Bradley Frank'
 
@@ -6,9 +6,7 @@ import magic
 import os
 import shutil
 import sys
-import tempfile
 import urllib.request
-from pathlib import Path
 from urllib.error import HTTPError
 from urllib.error import URLError
 
@@ -22,15 +20,22 @@ class PRDownloader:
     BASE_URL = 'https://www.sec.state.ma.us' + \
                '/AppealsWeb/Download.aspx?DownloadPath='
     MIMETYPES = {
-        'application/msword': 'doc'
-        'application/pdf': 'pdf'
+        'application/msword': 'doc',
+        'application/pdf': 'pdf',
     }
 
-    def __init__(self, prlog, download_path):
+    def __init__(self, prlog, download_path, temp_directory):
         #
         # The current logger for the application.
         #
         self.prlog = prlog
+
+        #
+        # Temp directory to use for saving downloaded documents. From here,
+        # the file will be moved to the download_path once it has been
+        # converted to the proper format.
+        #
+        self.temp_directory = temp_directory
 
         #
         # The permanent directory to save downloads.
@@ -42,7 +47,7 @@ class PRDownloader:
         # of various attributes; allows for future referencing once the
         # download has completed. The format is as follows:
         #
-        # downloads[document_ID] = {
+        # downloads[document_id] = {
         #   filename: <filename>
         #   mimetype: <mimetype>
         #   extension: <extension>
@@ -61,25 +66,25 @@ class PRDownloader:
         #
         self.prlog.log('debug', 'Created new PRDownloader instance.')
 
-    def get_records(self, document_ID):
+    def get_records(self, document_id):
         #
         # Pad the document number with zeros using zfill (e.g. 14 -> 00014).
-        # The document_ID needs to be a string first. This is how the website
+        # The document_id needs to be a string first. This is how the website
         # numbers the documents for downloading.
         #
-        document_ID = str(document_ID).zfill(5)
+        document_id = str(document_id).zfill(5)
 
         #
-        # Create the full download URL by appending the document_ID to the
+        # Create the full download URL by appending the document_id to the
         # base URL of the MA Secretary of State Appeals website.
         #
-        download_url = self.BASE_URL + document_ID
+        download_url = self.BASE_URL + document_id
 
         #
         # Set a temporary filename for downloading the documents. This is so
         # the file can be analyzed before saving it permenantly.
         #
-        tmpfile = os.path.join(self.temp_directory, document_ID)
+        tmpfile = os.path.join(self.temp_directory, document_id)
 
         #
         # Try to download the specified document. If problems are encountered
@@ -131,7 +136,7 @@ class PRDownloader:
         # permenant file name.
         #
         filename = os.path.join(self.download_path,
-                                document_ID + '.' + extension)
+                                document_id + '.' + extension)
 
         #
         # Move the temp file to the proper download location.
@@ -146,15 +151,15 @@ class PRDownloader:
         #
         # Update the latest document tracker.
         #
-        self.latest_document = document_ID
+        self.latest_document = document_id
 
         #
         # Update the document dictionary.
         #
-        self.downloads[document_ID] = {
-          'filename': filename
-          'mimetype': mimetype
-          'extension': extension
+        self.downloads[document_id] = {
+          'filename': filename,
+          'mimetype': mimetype,
+          'extension': extension,
         }
 
         #
@@ -164,7 +169,7 @@ class PRDownloader:
 
     def find_mimetype(self, tmpfile):
         #
-        # Determine the type of file downloaded. Ususally it's either a
+        # Determine the type of file downloaded. Usually it's either a
         # Word document, or a PDF.
         #
         mimetype = magic.from_file(tmpfile, mime=True)
@@ -176,23 +181,23 @@ class PRDownloader:
 
         return mimetype
 
-    def get_filename(self, document_ID):
+    def get_filename(self, document_id):
         #
         # Returns the full path and filename of the saved document.
         #
-        return self.downloads[document_ID]['filename']
+        return self.downloads[document_id]['filename']
 
-    def get_mimetype(self, document_ID):
+    def get_mimetype(self, document_id):
         #
         # Returns the mimetype of the saved document.
         #
-        return self.downloads[document_ID]['mimetype']
+        return self.downloads[document_id]['mimetype']
 
-    def get_extension(self, document_ID):
+    def get_extension(self, document_id):
         #
         # Returns the file extension of the saved document.
         #
-        return self.downloads[document_ID]['extension']
+        return self.downloads[document_id]['extension']
 
 
 if __name__ == '__main__':
