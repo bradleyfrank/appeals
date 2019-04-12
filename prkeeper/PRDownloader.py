@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import urllib.request
+import yaml
 from urllib.error import HTTPError
 from urllib.error import URLError
 
@@ -17,14 +18,7 @@ class PRDownloader:
     the MA Secretary of State website.
     """
 
-    BASE_URL = 'https://www.sec.state.ma.us' + \
-               '/AppealsWeb/Download.aspx?DownloadPath='
-    MIMETYPES = {
-        'application/msword': 'doc',
-        'application/pdf': 'pdf',
-    }
-
-    def __init__(self, prlog, download_path, temp_directory):
+    def __init__(self, prlog, prcfg, download_path, temp_directory):
         #
         # The current logger for the application.
         #
@@ -64,9 +58,16 @@ class PRDownloader:
         #
         # Log the successful creation of the class.
         #
-        self.prlog.log('debug', 'Created new PRDownloader instance.')
+        self.prlog.log('debug', 'Created new PRDownloader instance.') 
 
-    def get_records(self, document_id):
+        #
+        # Get the needed variables from the application config file that
+        # was previously loaded and passed to this class.
+        #
+        self.base_url = prcfg['prdownloader']['base_url']
+        self.mimetypes = prcfg['general']['mimetypes']
+
+    def get_record(self, document_id):
         #
         # Pad the document number with zeros using zfill (e.g. 14 -> 00014).
         # The document_id needs to be a string first. This is how the website
@@ -78,7 +79,7 @@ class PRDownloader:
         # Create the full download URL by appending the document_id to the
         # base URL of the MA Secretary of State Appeals website.
         #
-        download_url = self.BASE_URL + document_id
+        download_url = self.base_url + document_id
 
         #
         # Set a temporary filename for downloading the documents. This is so
@@ -126,7 +127,7 @@ class PRDownloader:
             # Match the discovered mimetype with allowable mimetypes to
             # determine the file extension.
             #
-            extension = self.MIMETYPES[mimetype]
+            extension = self.mimetypes[mimetype]
             self.prlog.log('debug', 'Determined extension to be ' + extension)
         else:
             return False
@@ -175,7 +176,7 @@ class PRDownloader:
         mimetype = magic.from_file(tmpfile, mime=True)
         self.prlog.log('debug', 'Mimetype is ' + str(mimetype))
 
-        if mimetype not in self.MIMETYPES:
+        if mimetype not in self.mimetypes:
             self.prlog.log('warning', 'Document is unexpected mimetype')
             return False
 

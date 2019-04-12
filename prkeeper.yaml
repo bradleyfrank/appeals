@@ -1,0 +1,7 @@
+general:
+  mimetypes:
+    'application/msword': 'doc'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx'
+    'application/pdf': 'pdf'
+prdownloader:
+  'base_url': 'https://www.sec.state.ma.us/AppealsWeb/Download.aspx?DownloadPath='

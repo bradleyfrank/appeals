@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 from prkeeper import PRAnalyzer
+from prkeeper import PRConfReader
 from prkeeper import PRDownloader
 from prkeeper import PRLogger
 
@@ -18,10 +19,9 @@ from prkeeper import PRLogger
 #
 DOWNLOAD_PATH = '/opt/prkeeper/downloads/appeals'
 LOG_FILE = '/opt/prkeeper/logs/prkeeper.log'
-DOCUMENTS = []
 
 
-def set_arguments():
+def create_arguments():
     #
     # Set available command-line arguments.
     #
@@ -89,7 +89,8 @@ def get_documents(start_range, end_range):
     # Instantiant the downloader class, providing a temporary directory
     # to use as scratch space to save downloads.
     #
-    prdl = PRDownloader.PRDownloader(prlog, DOWNLOAD_PATH, tempfile.mkdtemp())
+    prdl = PRDownloader.PRDownloader(prlog, prcfg, DOWNLOAD_PATH,
+                                     tempfile.mkdtemp())
 
     #
     # Loop through the given document range, downloading incrementally.
@@ -102,7 +103,7 @@ def get_documents(start_range, end_range):
         # Should it fail, the intention is to skip to the next document and
         # not exit the program.
         #
-        if prdl.get_records(document_id) is not False:
+        if prdl.get_record(document_id) is not False:
             #
             # Collect document attributes to use for analzying.
             #
@@ -135,7 +136,7 @@ def get_documents(start_range, end_range):
 #
 # Setup and read arguments given to the script.
 #
-args = set_arguments().parse_args()
+args = create_arguments().parse_args()
 
 #
 # Sets logging for the application: adds additional conole output if
@@ -145,6 +146,12 @@ if args.debug:
     prlog = PRLogger.PRLogger(LOG_FILE, log_to_console=True)
 else:
     prlog = PRLogger.PRLogger(LOG_FILE)
+
+#
+# Read configuration file.
+#
+prcr = PRConfReader.PRConfReader(prlog)
+prcfg = prcr.get_configs()
 
 #
 # If s3 was selected, setup the bucket if one does not exist already.
