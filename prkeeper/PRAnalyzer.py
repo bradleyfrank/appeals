@@ -99,8 +99,8 @@ class PRAnalyzer:
         # Usually this can be find in the XML file itself, but here it needs
         # to be manually set.
         #
-        dc={'dc': 'http://purl.org/dc/elements/1.1/'}
-        dcterms={'dcterms': 'http://purl.org/dc/terms/'}
+        dc={ 'dc': 'http://purl.org/dc/elements/1.1/' }
+        dcterms={ 'dcterms': 'http://purl.org/dc/terms/' }
 
         #
         # Extract the required metadata using the proper namespaces from above.
