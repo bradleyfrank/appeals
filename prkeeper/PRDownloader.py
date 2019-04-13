@@ -5,6 +5,7 @@ __author__ = 'Bradley Frank'
 import magic
 import os
 import shutil
+import subprocess
 import sys
 import urllib.request
 import yaml
@@ -44,7 +45,6 @@ class PRDownloader:
         # downloads[document_id] = {
         #   filename: <filename>
         #   mimetype: <mimetype>
-        #   extension: <extension>
         # }
         #
         self.downloads = []
@@ -62,7 +62,7 @@ class PRDownloader:
 
         #
         # Get the needed variables from the application config file that
-        # was previously loaded and passed to this class.
+        # was previously loaded and passed here.
         #
         self.base_url = prcfg['prdownloader']['base_url']
         self.mimetypes = prcfg['general']['mimetypes']
@@ -88,6 +88,14 @@ class PRDownloader:
         tmpfile = os.path.join(self.temp_directory, document_id)
 
         #
+        # Initialize the document dictionary with placeholders.
+        #
+        self.downloads[document_id] = {
+            'filename': None,
+            'mimetype': None,
+        }
+
+        #
         # Try to download the specified document. If problems are encountered
         # finding or downloading the document, log the error and skip to the
         # next document (if there is any remaining).
@@ -96,8 +104,7 @@ class PRDownloader:
         try:
             response = urllib.request.urlopen(download_url)
         except HTTPError as e:
-            self.prlog.log('warning', 'There was a problem retrieving \
-                           the file')
+            self.prlog.log('warning', 'There was a problem retrieving the file')
             self.prlog.log('debug', e.code)
             return False
         except URLError as e:
@@ -109,27 +116,33 @@ class PRDownloader:
         # Save the data retrieved from the website to a temporary file. This
         # allows analyzing the file before saving it permanently.
         #
-        self.prlog.log('debug', 'Writing to ' + tmpfile)
+        self.prlog.log('info', 'Writing to ' + tmpfile)
+
         try:
-            with open(tmpfile, 'wb') as f:
+            f = open(tmpfile, 'wb')
+            try:
                 shutil.copyfileobj(response, f)
-        except IOError as e:
+            except IOError as e:
+                self.prlog.log('debug', e)
+                sys.exit('Could not save to temp file ' + tmpfile)
+            finally:
+                f.close()
+        except OSError as e:
             self.prlog.log('debug', e)
-            sys.exit('Could not save to temp file ' + tmpfile)
+            sys.exit('Could not open the temp file ' + tmpfile)
 
         #
-        # Determine the file extension by way of the file's mimetype.
+        # Analyze the file to determine it's mimetype, which then in turn
+        # can be used to give the file a proper extension. This also handles
+        # non-existing files.
         #
-        mimetype = self.find_mimetype(tmpfile)
+        mimetype, extension = self.get_metadata(document_id, tmpfile)
 
-        if mimetype is not False:
-            #
-            # Match the discovered mimetype with allowable mimetypes to
-            # determine the file extension.
-            #
-            extension = self.mimetypes[mimetype]
-            self.prlog.log('debug', 'Determined extension to be ' + extension)
-        else:
+        #
+        # If the mimetype and/or extension could not ultimately be determined,
+        # this is the end for this particular document.
+        #
+        if mimetype is None or extension is None:
             return False
 
         #
@@ -138,6 +151,12 @@ class PRDownloader:
         #
         filename = os.path.join(self.download_path,
                                 document_id + '.' + extension)
+
+        #
+        # Update the document dictionary with the new metadata.
+        #
+        self.downloads[document_id]['mimetype'] = mimetype
+        self.downloads[document_id]['filename'] = filename
 
         #
         # Move the temp file to the proper download location.
@@ -155,32 +174,109 @@ class PRDownloader:
         self.latest_document = document_id
 
         #
-        # Update the document dictionary.
-        #
-        self.downloads[document_id] = {
-          'filename': filename,
-          'mimetype': mimetype,
-          'extension': extension,
-        }
-
-        #
         # The document was downloaded and saved successfully.
         #
         return True
 
-    def find_mimetype(self, tmpfile):
+    def get_metadata(self, document_id, tmpfile):
         #
-        # Determine the type of file downloaded. Usually it's either a
-        # Word document, or a PDF.
+        # Determine the type of file downloaded. Usually it's either a Word
+        # document, or a PDF.
         #
         mimetype = magic.from_file(tmpfile, mime=True)
         self.prlog.log('debug', 'Mimetype is ' + str(mimetype))
 
-        if mimetype not in self.mimetypes:
-            self.prlog.log('warning', 'Document is unexpected mimetype')
-            return False
+        #
+        # The old binary MS Word documents (.doc) are difficult to read and
+        # parse, so they need to be converted to the newer XML format (.docx)
+        # which is handled by the command line version of LibreOffice. This has
+        # the added benefit of retaining all the original metadata.
+        #
+        if mimetype == 'application/msword':
+            tmpfile = self.convert_doc_to_docx(tmpfile, document_id)
 
-        return mimetype
+            #
+            # If the file conversion failed for any reason, return the null
+            # result. The metadata cannot be trusted if LibreOffice was unable
+            # to read the file at all.
+            #
+            if tmpfile is None:
+                return (None, None)
+
+            #
+            # Otherwise if successful, now re-check the metadata of the 
+            # newly converted docx file.
+            #
+            return self.get_metadata(document_id, tmpfile)
+        #
+        # The mimetype was found and is supported.
+        #
+        elif mimetype in self.mimetypes:
+            #
+            # Match the discovered mimetype with allowable mimetypes to
+            # determine the file extension.
+            #
+            extension = self.mimetypes[mimetype]
+            self.prlog.log('debug', 'Determined extension to be ' +
+                            extension)
+            return (mimetype, extension)
+        #
+        # If the mimetype is unsupported, or couldn't be determined, end here,
+        # setting the document's attributes to null. It's a good indication
+        # there existed no file with this ID and the website returned an html
+        # document, which represents the site redirecting back to the main
+        # search page.
+        #
+        else:
+            self.prlog.log('warning', 'Document is unexpected/unsupported \
+                           mimetype')
+            return (None, None)
+
+    def convert_doc_to_docx(self, tmpfile, document_id):
+        #
+        # The document conversion will be completed by LibreOffice, which
+        # is invoked as `soffice` from the command line. Python can execute
+        # external commands, but they must be built in list format. This also
+        # sets the output directory to the temporary system directory that's
+        # being used for all downloaded documents.
+        #
+        cmd = (['soffice', '--headless', '--convert-to', 'docx', '--outdir',
+               self.temp_directory, tmpfile])
+
+        #
+        # All standard and error output which normally goes to the command
+        # line is suppressed because it only matters if the command succeeds
+        # or fails in this instance.
+        #
+        try:
+            subprocess.run(cmd,
+                           stdout=open(os.devnull, 'wb'),
+                           stderr=open(os.devnull, 'wb'))
+        except subprocess.CalledProcessError as e:
+            self.prlog.log('debug', e)
+            self.prlog.log('warning', 'Converting doc failed')
+            return None
+
+        #
+        # When converted, LibreOffice uses the basename of the file (everything
+        # before the extension -- which in this case there is no extension on
+        # the temp file) and adds the '.docx' suffix. Normally this is printed
+        # to the command line but it's easier to reconstruct the full path
+        # rather than parse the output. For example:
+        #
+        # > soffice --headless --convert-to docx --outdir /tmp /tmp/tmpfile
+        # convert /tmp/tempfile -> /tmp/tempfile.docx using filter ...
+        #
+        output_file = os.path.join(self.temp_directory, document_id + '.docx')
+
+        #
+        # But do test to make sure the file exists...
+        #
+        if not os.path.isfile(output_file):
+            self.prlog.log('error', 'Converted file not found ' + output_file)
+            return None
+
+        return output_file
 
     def get_filename(self, document_id):
         #
@@ -193,12 +289,6 @@ class PRDownloader:
         # Returns the mimetype of the saved document.
         #
         return self.downloads[document_id]['mimetype']
-
-    def get_extension(self, document_id):
-        #
-        # Returns the file extension of the saved document.
-        #
-        return self.downloads[document_id]['extension']
 
 
 if __name__ == '__main__':
