@@ -19,11 +19,27 @@ class PRDownloader:
     the MA Secretary of State website.
     """
 
-    def __init__(self, prlog, prcfg, download_path, temp_directory):
+    def __init__(self, prlog, prcfg, document_id,
+                 temp_directory, download_path):
         #
         # The current logger for the application.
         #
         self.prlog = prlog
+
+        #
+        # Get the needed variables from the application config file that
+        # was previously loaded and passed here.
+        #
+        self.base_url = prcfg['prdownloader']['base_url']
+        self.mimetypes = prcfg['general']['mimetypes']
+
+        #
+        # The ID of the appeal document to download.
+        # Pad the document number with zeros using zfill (e.g. 14 -> 00014).
+        # The document_id needs to be a string first. This is how the website
+        # numbers the documents for downloading.
+        #
+        self.document_id = str(document_id).zfill(5)
 
         #
         # Temp directory to use for saving downloaded documents. From here,
@@ -38,62 +54,30 @@ class PRDownloader:
         self.download_path = download_path
 
         #
-        # A list of dictionaries of the documents being downloaded, comprised
-        # of various attributes; allows for future referencing once the
-        # download has completed. The format is as follows:
+        # Initialize the document metadata with placeholders.
         #
-        # downloads[document_id] = {
-        #   filename: <filename>
-        #   mimetype: <mimetype>
-        # }
-        #
-        self.downloads = []
-
-        #
-        # Keep track of the latest document downloaded. This value will be
-        # used if the program was called using the --resume argument.
-        #
-        self.latest_document = None
+        self.filename = None
+        self.mimetype = None
+        self.extension = None
 
         #
         # Log the successful creation of the class.
         #
         self.prlog.log('debug', 'Created new PRDownloader instance.') 
 
-        #
-        # Get the needed variables from the application config file that
-        # was previously loaded and passed here.
-        #
-        self.base_url = prcfg['prdownloader']['base_url']
-        self.mimetypes = prcfg['general']['mimetypes']
 
-    def get_record(self, document_id):
-        #
-        # Pad the document number with zeros using zfill (e.g. 14 -> 00014).
-        # The document_id needs to be a string first. This is how the website
-        # numbers the documents for downloading.
-        #
-        document_id = str(document_id).zfill(5)
-
+    def get_record(self):
         #
         # Create the full download URL by appending the document_id to the
         # base URL of the MA Secretary of State Appeals website.
         #
-        download_url = self.base_url + document_id
+        download_url = self.base_url + self.document_id
 
         #
         # Set a temporary filename for downloading the documents. This is so
         # the file can be analyzed before saving it permenantly.
         #
-        tmpfile = os.path.join(self.temp_directory, document_id)
-
-        #
-        # Initialize the document dictionary with placeholders.
-        #
-        self.downloads[document_id] = {
-            'filename': None,
-            'mimetype': None,
-        }
+        self.tmpfile = os.path.join(self.temp_directory, self.document_id)
 
         #
         # Try to download the specified document. If problems are encountered
@@ -124,66 +108,55 @@ class PRDownloader:
                 shutil.copyfileobj(response, f)
             except IOError as e:
                 self.prlog.log('debug', e)
-                sys.exit('Could not save to temp file ' + tmpfile)
+                sys.exit('Could not save to temp file ' + self.tmpfile)
             finally:
                 f.close()
         except OSError as e:
             self.prlog.log('debug', e)
-            sys.exit('Could not open the temp file ' + tmpfile)
+            sys.exit('Could not open the temp file ' + self.tmpfile)
 
         #
         # Analyze the file to determine it's mimetype, which then in turn
         # can be used to give the file a proper extension. This also handles
         # non-existing files.
         #
-        mimetype, extension = self.get_metadata(document_id, tmpfile)
+        self.mimetype = self.get_metadata()
 
         #
         # If the mimetype and/or extension could not ultimately be determined,
         # this is the end for this particular document.
         #
-        if mimetype is None or extension is None:
+        if self.mimetype is None or self.extension is None:
             return False
 
         #
         # With the extension determined, set the full path to the new
         # permenant file name.
         #
-        filename = os.path.join(self.download_path,
-                                document_id + '.' + extension)
-
-        #
-        # Update the document dictionary with the new metadata.
-        #
-        self.downloads[document_id]['mimetype'] = mimetype
-        self.downloads[document_id]['filename'] = filename
+        fn = self.document_id + '.' + self.extension
+        self.filename = os.path.join(self.download_path, fn)
 
         #
         # Move the temp file to the proper download location.
         #
-        self.prlog.log('info', 'Moving temp file to ' + filename)
+        self.prlog.log('info', 'Moving temp file to ' + self.filename)
         try:
-            shutil.move(tmpfile, filename)
+            shutil.move(self.tmpfile, self.filename)
         except IOError as e:
             self.prlog.log('debug', e)
-            sys.exit('Could not move temp file to ' + filename)
-
-        #
-        # Update the latest document tracker.
-        #
-        self.latest_document = document_id
+            sys.exit('Could not move temp file to ' + self.filename)
 
         #
         # The document was downloaded and saved successfully.
         #
         return True
 
-    def get_metadata(self, document_id, tmpfile):
+    def get_metadata(self):
         #
         # Determine the type of file downloaded. Usually it's either a Word
         # document, or a PDF.
         #
-        mimetype = magic.from_file(tmpfile, mime=True)
+        mimetype = magic.from_file(self.tmpfile, mime=True)
         self.prlog.log('debug', 'Mimetype is ' + str(mimetype))
 
         #
@@ -193,21 +166,22 @@ class PRDownloader:
         # the added benefit of retaining all the original metadata.
         #
         if mimetype == 'application/msword':
-            tmpfile = self.convert_doc_to_docx(tmpfile, document_id)
+            self.tmpfile = self.convert_doc_to_docx(self.tmpfile,
+                                                    self.document_id)
 
             #
             # If the file conversion failed for any reason, return the null
             # result. The metadata cannot be trusted if LibreOffice was unable
             # to read the file at all.
             #
-            if tmpfile is None:
-                return (None, None)
+            if self.tmpfile is None:
+                return None
 
             #
             # Otherwise if successful, now re-check the metadata of the 
             # newly converted docx file.
             #
-            return self.get_metadata(document_id, tmpfile)
+            return self.get_metadata()
         #
         # The mimetype was found and is supported.
         #
@@ -216,10 +190,10 @@ class PRDownloader:
             # Match the discovered mimetype with allowable mimetypes to
             # determine the file extension.
             #
-            extension = self.mimetypes[mimetype]
+            self.extension = self.mimetypes[mimetype]
             self.prlog.log('debug', 'Determined extension to be ' +
-                            extension)
-            return (mimetype, extension)
+                            self.extension)
+            return mimetype
         #
         # If the mimetype is unsupported, or couldn't be determined, end here,
         # setting the document's attributes to null. It's a good indication
@@ -277,18 +251,6 @@ class PRDownloader:
             return None
 
         return output_file
-
-    def get_filename(self, document_id):
-        #
-        # Returns the full path and filename of the saved document.
-        #
-        return self.downloads[document_id]['filename']
-
-    def get_mimetype(self, document_id):
-        #
-        # Returns the mimetype of the saved document.
-        #
-        return self.downloads[document_id]['mimetype']
 
 
 if __name__ == '__main__':
