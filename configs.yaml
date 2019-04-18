@@ -1,0 +1,10 @@
+general:
+  log_file: '/opt/prkeeper/logs/prkeeper.log'
+  valid_mimetypes:
+    'application/msword': 'doc'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx'
+    'application/pdf': 'pdf'
+prdownloader:
+  base_url: 'https://www.sec.state.ma.us/AppealsWeb/Download.aspx?DownloadPath='
+  download_path_final: '/opt/prkeeper/downloads/appeals/final'
+  download_path_raw: '/opt/prkeeper/downloads/appeals/raw'
