@@ -62,6 +62,39 @@ def create_arguments():
     return arguments
 
 
+def get_configs(prlog):
+    #
+    # Get the current working directory of this script.
+    #
+    # The join() call prepends the current working directory, but the
+    # documentation says that if some path is absolute, all other paths
+    # left of it are dropped. Therefore, getcwd() is dropped when
+    # dirname(__file__) returns an absolute path. The realpath call
+    # resolves symbolic links if any are found.
+    #
+    __location__ = os.path.realpath(
+        os.path.join(os.getcwd(), os.path.dirname(__file__)))
+
+    #
+    # Open and load the configuration file.
+    #
+    conf = os.path.join(__location__, 'configs.yaml')
+    try:
+        f = open(conf, 'r')
+        try:
+            configs = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            prlog.log('debug', e)
+            sys.exit('Could not load yaml file ' + conf)
+        finally:
+            f.close()
+    except OSError as e:
+        prlog.log('debug', e)
+        sys.exit('Could not open config file ' + conf)
+
+    return configs
+
+
 def get_documents(start_range, end_range):
     #
     # Log the download range.
@@ -86,16 +119,16 @@ def get_documents(start_range, end_range):
     document_id = start_range
 
     #
-    # Instantiant the downloader class, providing a temporary directory
-    # to use as scratch space to save downloads.
-    #
-    prdl = PRDownloader.PRDownloader(prlog, prcfg, DOWNLOAD_PATH,
-                                     tempfile.mkdtemp())
-
-    #
     # Loop through the given document range, downloading incrementally.
     #
     while continue_downloads is True:
+        #
+        # Instantiant the downloader class, providing a temporary directory
+        # to use as scratch space to save downloads.
+        #
+        prdl = PRDownloader.PRDownloader(prlog, prcfg, document_id,
+                                         DOWNLOAD_PATH, tempfile.mkdtemp())
+
         #
         # Calls the function to handle the download, passing the document ID
         # to download. PRDownloader tracks document attributes as it downloads
@@ -103,7 +136,7 @@ def get_documents(start_range, end_range):
         # Should it fail, the intention is to skip to the next document and
         # not exit the program.
         #
-        if prdl.get_record(document_id) is not False:
+        if prdl.get_record() is not False:
             #
             # Collect document attributes to use for analzying.
             #
