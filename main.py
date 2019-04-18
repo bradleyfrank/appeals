@@ -6,19 +6,13 @@ import argparse
 import os
 import sys
 import tempfile
+import yaml
 from prkeeper import PRAnalyzer
 from prkeeper import PRConfReader
 from prkeeper import PRDownloader
 from prkeeper import PRLogger
 
-#
-# General script variables:
-#
-# DOWNLOAD_PATH: local save location for downloaded documents
-# LOG_FILE: application-wide log file
-#
-DOWNLOAD_PATH = '/opt/prkeeper/downloads/appeals'
-LOG_FILE = '/opt/prkeeper/logs/prkeeper.log'
+CONFIGS = None
 
 
 def create_arguments():
@@ -119,51 +113,59 @@ def get_documents(start_range, end_range):
     document_id = start_range
 
     #
+    # Instantiant the downloader class which will handle downloading and
+    # saving the documents.
+    #
+    prdl = PRDownloader.PRDownloader(prlog, CONFIGS)
+
+    #
     # Loop through the given document range, downloading incrementally.
     #
     while continue_downloads is True:
         #
-        # Instantiant the downloader class, providing a temporary directory
-        # to use as scratch space to save downloads.
+        # Calls the function to handle the download, passing the document ID
+        # to download. It will return False if the download fails at any point.
         #
-        prdl = PRDownloader.PRDownloader(prlog, prcfg, document_id,
-                                         DOWNLOAD_PATH, tempfile.mkdtemp())
+        raw_document = prdl.download_document(document_id)
 
         #
-        # Calls the function to handle the download, passing the document ID
-        # to download. PRDownloader tracks document attributes as it downloads
-        # each file. It will return False if the download fails at any point.
         # Should it fail, the intention is to skip to the next document and
         # not exit the program.
         #
-        if prdl.get_record() is not False:
-            #
-            # Collect document attributes to use for analzying.
-            #
-            filename = prdl.get_filename(document_id)
-            mimetype = prdl.get_mimetype(document_id)
-            extension = prdl.get_extension(document_id)
+        if raw_document is False:
+            continue
 
-            #
-            # Creates an PRAnalyzer instance for gathering metadata and parsing
-            # text of the document for uploading to the database.
-            #
-            DOCUMENTS[document_id] = PRAnalyzer.PRAnalyzer(prlog,
-                                                           filename,
-                                                           mimetype,
-                                                           extension)
+        #
+        # Creates an PRAnalyzer instance for gathering metadata and parsing
+        # text of the document for uploading to the database.
+        #
+        DOCUMENTS[document_id] = PRAnalyzer.PRAnalyzer(prlog, raw_document)
 
-            #
-            # The creation date of the document is used to inform the program
-            # to continue or stop downloading further documents (since in
-            # theory there wouldn't be documents with creation dates in the
-            # future), even if the program hasn't reached the end of a
-            # specified range given by the user. The first step is to extract
-            # the creation date.
-            #
-            # creation_date = DOCUMENTS[document_id].get_creation_date()
-        else:
-            prlog.log('warning', 'Downloading ' + str(document_id) + ' failed')
+        #
+        # Analyze the file to determine it's mimetype, which then in turn
+        # can be used to give the file a proper extension. This also handles
+        # non-existing files.
+        #
+        mimetype = DOCUMENTS[document_id].find_mimetype()
+
+        #
+        # If the mimetype and/or extension could not ultimately be determined,
+        # this is the end for this particular document.
+        #
+        if self.mimetype is None or self.extension is None:
+            return False
+
+        #
+        # The creation date of the document is used to inform the program
+        # to continue or stop downloading further documents (since in
+        # theory there wouldn't be documents with creation dates in the
+        # future), even if the program hasn't reached the end of a
+        # specified range given by the user. The first step is to extract
+        # the creation date.
+        #
+        # creation_date = DOCUMENTS[document_id].get_creation_date()
+    else:
+        prlog.log('warning', 'Downloading ' + str(document_id) + ' failed')
 
 
 #
@@ -183,8 +185,7 @@ else:
 #
 # Read configuration file.
 #
-prcr = PRConfReader.PRConfReader(prlog)
-prcfg = prcr.get_configs()
+CONFIGS = get_configs(prlog)
 
 #
 # If s3 was selected, setup the bucket if one does not exist already.

@@ -13,11 +13,16 @@ from PyPDF2.utils import PdfReadError
 
 class PRAnalyzer:
 
-    def __init__(self, prlog, filename, mimetype, extension):
+    def __init__(self, prlog, document):
         #
         # The current logger for the application.
         #
         self.prlog = prlog
+
+        #
+        # The document to be analzyed.
+        #
+        self.document = document
 
         #
         # Today's date for comparison to document creation date.
@@ -38,6 +43,66 @@ class PRAnalyzer:
         self.createdDate = None
         self.modifiedDate = None
         self.title = None
+
+        #
+        # Log the successful creation of the class.
+        #
+        self.prlog.log('debug', 'Created new PRAnalyzer instance.')
+
+    def find_mimetype(self):
+        #
+        # Use the magic module to determine the mimetype.
+        # https://github.com/ahupp/python-magic
+        #
+        mimetype = magic.from_file(self.document, mime=True)
+        self.prlog.log('debug', 'Mimetype is ' + str(mimetype))
+
+        #
+        # The old binary MS Word documents (.doc) are difficult to read and
+        # parse, so they need to be converted to the newer XML format (.docx)
+        # which is handled by the command line version of LibreOffice. This has
+        # the added benefit of retaining all the original metadata.
+        #
+        if mimetype == 'application/msword':
+            self.document = self.convert_doc_to_docx(self.document,
+                                                    self.document_id)
+
+            #
+            # If the file conversion failed for any reason, return the null
+            # result. The metadata cannot be trusted if LibreOffice was unable
+            # to read the file at all.
+            #
+            if self.document is None:
+                return None
+
+            #
+            # Otherwise if successful, now re-check the metadata of the 
+            # newly converted docx file.
+            #
+            return self.get_metadata()
+        #
+        # The mimetype was found and is supported.
+        #
+        elif mimetype in self.valid_mimetypes:
+            #
+            # Match the discovered mimetype with allowable mimetypes to
+            # determine the file extension.
+            #
+            self.extension = self.valid_mimetypes[mimetype]
+            self.prlog.log('debug', 'Determined extension to be ' +
+                           self.extension)
+            return mimetype
+        #
+        # If the mimetype is unsupported, or couldn't be determined, end here,
+        # setting the document's attributes to null. It's a good indication
+        # there existed no file with this ID and the website returned an html
+        # document, which represents the site redirecting back to the main
+        # search page.
+        #
+        else:
+            self.prlog.log('warning', 'Document is unexpected/unsupported \
+                           mimetype')
+            return None
 
     def get_metadata(self):
         """Extract PDF and Word document metadata.
