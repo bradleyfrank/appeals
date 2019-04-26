@@ -2,94 +2,37 @@
 
 __author__ = 'Bradley Frank'
 
-import argparse
+#
+# Import standard Python libraries.
+#
+import datetime
 import os
 import sys
 import tempfile
-import yaml
+
+#
+# Import custom independent functions.
+#   import <filename> as <function reference>
+#
+# Then call imported functions like so: <function reference>.<function name>
+#
+import helpers as helpers
+
+#
+# Import custom classes.
+#   from <directory> import <filename>
+#
+# Then call imported classes like so: <filename>.<class name>
+#
 from prkeeper import PRAnalyzer
-from prkeeper import PRConfReader
+from prkeeper import PRConverter
 from prkeeper import PRDownloader
 from prkeeper import PRLogger
 
 CONFIGS = None
 
-
-def create_arguments():
-    #
-    # Set available command-line arguments.
-    #
-    arguments = argparse.ArgumentParser(
-        description='Downloads Massachusetts public records.')
-
-    #
-    # --debug
-    # Prints all debug messages to the console.
-    #
-    arguments.add_argument('-d', '--debug', action='store_true',
-                           help='enables console debug messages')
-
-    #
-    # --resume | --scope
-    # Downloads can be expressed in an explicit range, or resumed from a prior
-    # run of the program. Continuing is the default setting. The last download
-    # is tracked in the status file. These settings are mutually exclusive.
-    #
-    download_method = arguments.add_mutually_exclusive_group(required=True)
-    download_method.add_argument('-r', '--resume', action='store_true',
-                                 help='resumes downloading from a prior run')
-    download_method.add_argument('-s', '--scope', type=int, nargs=2,
-                                 help='download documents between start and \
-                                 end values (inclusive); set end value to 0 \
-                                 to download all available documents after \
-                                 start value')
-
-    #
-    # --s3
-    # Saves documents to an AWS s3 bucket. By default the documents save to
-    # disk, but s3 can also be used. Credentials for AWS should be entered
-    # into the credentials.env file found in this Git repo.
-    #
-    arguments.add_argument('--s3', action='store_true',
-                           help='saves downloads to aws s3 bucket')
-
-    return arguments
-
-
-def get_configs(prlog):
-    #
-    # Get the current working directory of this script.
-    #
-    # The join() call prepends the current working directory, but the
-    # documentation says that if some path is absolute, all other paths
-    # left of it are dropped. Therefore, getcwd() is dropped when
-    # dirname(__file__) returns an absolute path. The realpath call
-    # resolves symbolic links if any are found.
-    #
-    __location__ = os.path.realpath(
-        os.path.join(os.getcwd(), os.path.dirname(__file__)))
-
-    #
-    # Open and load the configuration file.
-    #
-    conf = os.path.join(__location__, 'configs.yaml')
-    try:
-        f = open(conf, 'r')
-        try:
-            configs = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            prlog.log('debug', e)
-            sys.exit('Could not load yaml file ' + conf)
-        finally:
-            f.close()
-    except OSError as e:
-        prlog.log('debug', e)
-        sys.exit('Could not open config file ' + conf)
-
-    return configs
-
-
-def get_documents(start_range, end_range):
+def get_documents(prlog, start_range, end_range):
+    """Download and process documents."""
     #
     # Log the download range.
     #
@@ -102,9 +45,9 @@ def get_documents(start_range, end_range):
     continue_downloads = True
 
     #
-    # Latest document successfully downloaded.
+    # Today's date for comparison to document creation date.
     #
-    latest_document = None
+    today = datetime.datetime.now()
 
     #
     # The document ID that is being downloaded. Set to the start_range
@@ -113,10 +56,21 @@ def get_documents(start_range, end_range):
     document_id = start_range
 
     #
-    # Instantiant the downloader class which will handle downloading and
+    # Create an instance of PRDownloader which will handle downloading and
     # saving the documents.
     #
-    prdl = PRDownloader.PRDownloader(prlog, CONFIGS)
+    prdl = PRDownloader.PRDownloader(
+        prlog,
+        CONFIGS['prdownloader']['base_url'],
+        CONFIGS['prdownloader']['download_path_raw'],
+        CONFIGS['prdownloader']['download_path_final']
+    )
+
+    #
+    # Create an instance of PRAnalyzer which collects metadata and performs
+    # text extraction from documents.
+    #
+    przy = PRAnalyzer.PRAnalyzer(prlog)
 
     #
     # Loop through the given document range, downloading incrementally.
@@ -124,36 +78,44 @@ def get_documents(start_range, end_range):
     while continue_downloads is True:
         #
         # Calls the function to handle the download, passing the document ID
-        # to download. It will return False if the download fails at any point.
+        # to download.
         #
-        raw_document = prdl.download_document(document_id)
+        rawfile = prdl.download_document(document_id)
 
         #
-        # Should it fail, the intention is to skip to the next document and
-        # not exit the program.
+        # Should downloading fail, the intention is to skip to the next
+        # document and not exit the program.
         #
-        if raw_document is False:
+        if rawfile is None:
             continue
 
         #
-        # Creates an PRAnalyzer instance for gathering metadata and parsing
-        # text of the document for uploading to the database.
+        # Ensure the raw download is a valid type of file.
         #
-        DOCUMENTS[document_id] = PRAnalyzer.PRAnalyzer(prlog, raw_document)
-
-        #
-        # Analyze the file to determine it's mimetype, which then in turn
-        # can be used to give the file a proper extension. This also handles
-        # non-existing files.
-        #
-        mimetype = DOCUMENTS[document_id].find_mimetype()
+        document, mimetype = filter_document(prlog, przy, rawfile)
 
         #
         # If the mimetype and/or extension could not ultimately be determined,
         # this is the end for this particular document.
         #
-        if self.mimetype is None or self.extension is None:
-            return False
+        if document is None or mimetype is None:
+            continue
+
+        #
+        #
+        #
+        extension = przy.get_extension(document, mimetype,
+                                       CONFIGS['general']['valid_mimetypes'])
+
+        #
+        #
+        #
+        filename = document_id + extension
+
+        #
+        #
+        #
+        prdl.save_document(document, filename)
 
         #
         # The creation date of the document is used to inform the program
@@ -163,21 +125,76 @@ def get_documents(start_range, end_range):
         # specified range given by the user. The first step is to extract
         # the creation date.
         #
-        # creation_date = DOCUMENTS[document_id].get_creation_date()
+        creation_date = przy.get_creation_date(document)
     else:
         prlog.log('warning', 'Downloading ' + str(document_id) + ' failed')
 
+def filter_document(prlog, przy, document):
+    """Ensure document is type Word or PDF."""
+    #
+    # Analyze the file to determine it's mimetype, which then in turn
+    # can be used to give the file a proper extension.
+    #
+    mimetype = przy.find_mimetype(document)
+
+    #
+    # The old binary MS Word documents (.doc) are difficult to read and
+    # parse, so they need to be converted to the newer XML format (.docx)
+    # which is handled by the command line version of LibreOffice. This has
+    # the added benefit of retaining all the original metadata.
+    #
+    if mimetype == 'application/msword':
+        prvt = PRConverter.PRConverter(prlog)
+        document = prvt.convert_doc_to_docx(
+            CONFIGS['prdownloader']['download_path_raw'],
+            document
+        )
+
+        #
+        # If the file conversion failed for any reason, stop processing
+        # the file. The metadata cannot be trusted if LibreOffice was
+        # unable to read the file.
+        #
+        if document is None:
+            return (None, None)
+
+        #
+        # Otherwise re-check the mimetype of the newly converted docx file.
+        #
+        return filter_document(prlog, przy, document)
+    #
+    # The mimetype was found and is supported, return file metadata.
+    #
+    elif mimetype in CONFIGS['general']['valid_mimetypes']:
+        return document, mimetype
+    #
+    # If the mimetype is unsupported, or couldn't be determined, end here,
+    # setting the document's attributes to null. It's a good indication
+    # there existed no file with this ID and the website returned an html
+    # document, which represents the site redirecting back to the main
+    # search page.
+    #
+    else:
+        self.prlog.log('warning', 'Document is unexpected/unsupported
+                        mimetype')
+        return (None, None)
 
 #
-# Setup and read arguments given to the script.
+# Build a set of options that is available to the user.
 #
-args = create_arguments().parse_args()
+arguments = helpers.create_arguments()
+
+#
+# Read the settings passed to the script by the user. The parse_args() function
+# comes from the "argparse" Python module.
+#
+user_settings = arguments.parse_args()
 
 #
 # Sets logging for the application: adds additional conole output if
 # the debug argument is passed, otherwise just logs to file by default.
 #
-if args.debug:
+if user_settings.debug:
     prlog = PRLogger.PRLogger(LOG_FILE, log_to_console=True)
 else:
     prlog = PRLogger.PRLogger(LOG_FILE)
@@ -185,13 +202,13 @@ else:
 #
 # Read configuration file.
 #
-CONFIGS = get_configs(prlog)
+CONFIGS = helpers.get_configs(prlog)
 
 #
 # If s3 was selected, setup the bucket if one does not exist already.
 # Otherwise, ensure the download directory exists on disk.
 #
-if args.s3:
+if user_settings.s3:
     pass
 elif not os.path.isdir(DOWNLOAD_PATH):
     os.makedirs(DOWNLOAD_PATH, exist_ok=True)
@@ -200,32 +217,29 @@ elif not os.path.isdir(DOWNLOAD_PATH):
 # Download the documents. The first method:
 # A range of documents to download, i.e. the "scope" argument is set.
 #
-if args.scope:
+if user_settings.scope:
     #
     # The high-end value can only be less than the low-end value if the
     # high-end value is 0, which means begin at the low-end value and
     # continue until reaching the end.
     #
-    if args.scope[1] == 0:
-        get_documents(args.scope[0], None)
+    if user_settings.scope[1] == 0:
+        get_documents(prlog, user_settings.scope[0], None)
     #
-    # If tThe high-end value is less than the low-end value, exit with error.
+    # If the high-end value is less than the low-end value, exit with error.
     #
-    elif args.scope[1] < args.scope[0]:
+    elif user_settings.scope[1] < user_settings.scope[0]:
         sys.exit('Start range cannot be greater than end range.')
     #
-    # Otherwise a nominal range was given.
+    # Otherwise a nominal range was given, proceed to download those documents.
     #
     else:
-        #
-        # A regular scope was provided, proceed to download those documents.
-        #
-        get_documents(args.scope[0], args.scope[1])
+        get_documents(prlog, user_settings.scope[0], user_settings.scope[1])
 #
 # Download the documents. The second method:
 # Start from where last left off, i.e. the "resume" argument is set.
 #
-elif args.resume:
+elif user_settings.resume:
     prlog.log('info', 'Resuming downloads')
     # TODO: get last downloaded document
     # get_documents(start_value, None)

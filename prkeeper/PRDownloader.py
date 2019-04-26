@@ -13,23 +13,20 @@ from urllib.error import URLError
 
 
 class PRDownloader:
-    """
-    Class for handling downloading, type checking, and saving documents from
-    the MA Secretary of State website.
+    """Downloads appeals documents from the MA Secretary of State website.
+
+    :param prlog: A Logger instance.
+    :param base_url: A string, URL to use for downloading documents.
+    :param download_path_raw: A string, directory for saving all downloads.
+    :param download_path_final: A string, directory for saving documents.
     """
 
-    def __init__(self, prlog, prcfg):
-        #
-        # The current logger for the application.
-        #
+    def __init__(self, prlog, base_url, download_path_raw, download_path_final):
+        """Initialize PRDownloader class."""
         self.prlog = prlog
-
-        #
-        # Get the needed variables from the application config file.
-        #
-        self.base_url = prcfg['prdownloader']['base_url']
-        self.download_path_final = prcfg['prdownloader']['download_path_final']
-        self.download_path_raw = prcfg['prdownloader']['download_path_raw']
+        self.base_url = base_url
+        self.download_path_final = download_path_final
+        self.download_path_raw = download_path_raw
 
         #
         # Log the successful creation of the class.
@@ -69,11 +66,11 @@ class PRDownloader:
         except HTTPError as e:
             self.prlog.log('warning', 'There was a problem retrieving the file')
             self.prlog.log('debug', e.code)
-            return False
+            return None
         except URLError as e:
             self.prlog.log('warning', 'There was a problem finding the file')
             self.prlog.log('debug', e.reason)
-            return False
+            return None
 
         #
         # Save the data retrieved from the website to a temporary file. This
@@ -96,9 +93,11 @@ class PRDownloader:
 
         return rawfile
 
-    def save_final_document(self, document_id):
-        rawfile = os.path.join(self.download_path_raw, document_id)
-        filename = os.path.join(self.download_path_final, document_id)
+    def save_document(self, rawfile, document):
+        """
+        """
+
+        filename = os.path.join(self.download_path_final, document)
 
         #
         # Ensure the raw document exists before moving it.
@@ -115,6 +114,8 @@ class PRDownloader:
         except IOError as e:
             self.prlog.log('debug', e)
             sys.exit('Could not move raw file to ' + filename)
+
+        return filename
 
 
 if __name__ == '__main__':
