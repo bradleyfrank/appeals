@@ -104,7 +104,8 @@ def get_documents(prlog, start_range, end_range):
         #
         #
         #
-        extension = przy.get_extension(document, mimetype,
+        extension = przy.get_extension(document,
+                                       mimetype,
                                        CONFIGS['general']['valid_mimetypes'])
 
         #
