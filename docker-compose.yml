@@ -3,28 +3,12 @@ version: '3'
 services:
   prkeeper:
     container_name: prkeeper
-    env_file:
-      - ./credentials.env
-    environment:
-      - MYSQL_DATABASE=prkeeper
-      - MYSQL_USER=prkeeper
     hostname: prkeeper
     image: prkeeper
-    links: prdb
     restart: always
     volumes:
       - prkeeper:/srv/public_records
 
-#  prdb:
-#    container_name: prdb
-#    hostname: prdb
-#    image: mariadb
-#    restart: always
-#    volumes:
-#      - prdb:/var/lib/mysql
-
 volumes:
   prkeeper:
     external: true
-#  prdb:
-#    external: true
