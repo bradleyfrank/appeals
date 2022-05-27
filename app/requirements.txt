@@ -1,10 +1,5 @@
-# determining file mimetype
-python-magic
-# reading and manipulating PDF files
-pypdf2
-# interacting with AWS S3 storage
-boto3
-# reading yaml config file
-PyYAML
-# parsing docx component files
-lxml
+logzero==1.7.0
+lxml==4.8.0
+pylint==2.13.4
+PyPDF2==1.26.0
+python-magic==0.4.25

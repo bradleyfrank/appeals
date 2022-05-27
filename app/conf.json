@@ -1,0 +1,15 @@
+{
+  "general": {
+    "log_file": "/opt/logs/prkeeper.log",
+    "valid_mimetypes": {
+      "application/msword": "doc",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+      "application/pdf": "pdf"
+    }
+  },
+  "prdownloader": {
+    "base_url": "https://www.sec.state.ma.us/AppealsWeb/Download.aspx?DownloadPath=",
+    "download_path_final": "/opt/docs/final",
+    "download_path_raw": "/opt/docs/raw"
+  }
+}
